@@ -1,0 +1,5 @@
+ESPNewTUne	KEYWORD1
+begin	KEYWORD2
+autoConnect	KEYWORD2
+isConnected	KEYWORD2
+loop	KEYWORD2

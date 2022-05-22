@@ -1,0 +1,21 @@
+{
+  "name": "ESPNewTune",
+  "keywords": "ESPNewTune, WiFi, Manager, Captive, Portal, Configuration, Access Point",
+  "description": "Simple & Easy WiFi Manager with Captive Portal for ESP32",
+  "repository":
+  {
+    "type": "git",
+    "url": ""
+  },
+  "authors":
+  [
+    {
+      "name": "Natrayan Palani Appan",
+      "email": "natrayanp@gmail.com",
+      "maintainer": true
+    }
+  ],
+  "version": "1.0.0",
+  "frameworks": "arduino",
+  "platforms": "espressif"
+}
