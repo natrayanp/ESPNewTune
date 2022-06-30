@@ -268,8 +268,386 @@ void NeerClass::begin(AsyncWebServer* server){
 }
 
 
+cJSON* NeerClass::getPlanitem(char* planname){
+
+    cJSON * planitem = NULL;
+
+    for(i = 0; i < cJSON_GetArraySize(_planconfig) ; i++){
+        cJSON* subitemplconf = cJSON_GetArrayItem(_planconfig, i);    
+        cJSON* nameplconf = cJSON_GetObjectItem(subitemplconf, "name");
+        if(nameplconf-> valuestring == planname ){
+            //TODO checks
+            planitem = subitemplconf;            
+            //stepsitem = cJSON_GetObjectItem(subitemplconf, "steps");            
+            break;
+        }
+    }
+
+    return planitem;
+}
+
+int NeerClass::flipPinValue(int pval){
+    pval?return 0:return 1;
+}
+
+int NeerClass::flipOnOffState(char* pval){
+    pval=="on"?return "off":return "on";
+}
+
+
+void NeerClass::excuteCommand(char* command, cJSON*stepitem){
+
+    if (command == "D"){
+        cJSON *stepfield =cJSON_GetObjectItem(stepitem, "field");
+        vTaskDelay(stepfield->valueint);
+    }else if (command == "O") {        
+        cJSON* pintype = cJSON_GetObjectItem(stepitem, "pintype");
+        cJSON* pinnum = cJSON_GetObjectItem(stepitem, "pinnum");
+        cJSON* pinvalue = cJSON_GetObjectItem(stepitem, "pinvalue");
+        //Call 595 library
+        sr.set(pinnum->valueint, pinvalue->valueint);
+
+    } else if (command == "OR") {
+        cJSON* pintype = cJSON_GetObjectItem(stepitem, "pintype");
+        cJSON* pinnum = cJSON_GetObjectItem(stepitem, "pinnum");
+        cJSON* pinvalue = cJSON_GetObjectItem(stepitem, "pinvalue");
+        //Call 595 library with flipped value of pin
+        sr.set(pinnum->valueint, pinvalue->valueint);
+    }
+}
+
+void NeerClass::executeStep(taskitem *taskit){
+    cJSON *stepname =cJSON_GetObjectItem(taskit->stepitem, "name");   
+    cJSON *stepfield =cJSON_GetObjectItem(taskit->stepitem, "field"); 
+    
+    //TODO : make this as configured value to be run only for last step in schedule
+    if (stepname->valuestring = "Motor" && !(isfianlstep)) {
+        return;
+    }
+
+    if (stepname->valuestring == "delay"){
+        excuteCommand("D", taskit->stepitem);
+    }else {
+        for(i = 0; i < cJSON_GetArraySize(_pinconfig) ; i++){
+            cJSON* subitempinconf = cJSON_GetArrayItem(_pinconfig, i);    
+            cJSON* pinconfname = cJSON_GetObjectItem(subitempinconf, "name");
+
+            if(pinconfname->valuestring == stepname->valuestring){
+                //TODO checks
+                if (stepfield->valuestring == "on" || stepfield->valuestring =="off"){                    
+
+                    char* sf;
+                    if(taskit->runtype == "R"){
+                        sf = flipOnOffState(stepfield->valuestring);
+                    } else {
+                        sf = stepfield->valuestring;
+                    }
+                    cJSON* fieldval = cJSON_GetObjectItem(subitempinconf, sf);
+                    excuteCommand("O", fieldval);
+                    cJSON* signaltype = cJSON_GetObjectItem(fieldval, "signaltype");
+                    if(signaltype->valuestring == "trigger"){
+                        cJSON *resolution = cJSON_CreateObject();
+                        cJSON* triggerdelay = cJSON_GetObjectItem(fieldval, "triggerdelay");
+                        cJSON* pinvalue1 = cJSON_GetObjectItem(fieldval, "pinvalue");
+                        cJSON *delaytime = cJSON_CreateNumber(triggerdelay->valueint);
+                        cJSON_AddItemToObject(resolution, "field", delaytime1);
+                        excuteCommand("D", resolution);
+                        excuteCommand("OR", fieldval);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+bool NeerClass::chkforcestop() {
+    return forcestop;
+}
+
+void NeerClass::runInstructionFromPlan(taskitem *taskit){
+    cJSON * stepsitem = NULL;
+    //cJSON * planitem = NULL;
+
+    /*
+    for(i = 0; i < cJSON_GetArraySize(_planconfig) ; i++){
+        cJSON* subitemplconf = cJSON_GetArrayItem(_planconfig, i);    
+        cJSON* nameplconf = cJSON_GetObjectItem(subitemplconf, "name");
+        if(nameplconf-> valuestring == plan ){
+            //TODO checks
+            planitem = subitemplconf;
+            stepsitem = cJSON_GetObjectItem(subitemplconf, "steps");            
+            break;
+        }
+    }
+    */
+
+    stepsitem = cJSON_GetObjectItem(taskit->planitem, "steps"); 
+
+    if(stepsitem != NULL){
+        int az = cJSON_GetArraySize(stepsitem);
+        if(runtype == "F"){
+            for(i = 0; i < az ; i++){
+                taskit->stepsitem = cJSON_GetArrayItem(stepsitem, i);
+                //executeStep(cJSON_GetArrayItem(stepsitem, i),runtype);
+                executeStep(taskit);
+            }
+        } else if(runtype == "R"){
+            for(i = az-1; i >= 0 ; i--){
+                taskit->stepsitem = cJSON_GetArrayItem(stepsitem, i);
+                //executeStep(cJSON_GetArrayItem(stepsitem, i),runtype);
+                executeStep(taskit);
+            }
+        }
+    }
+}
+
+
+void NeerClass::executePlan(taskitem *taskit){
+    cJSON * planitem = NULL;
+    cJSON * fPlanitem = NULL;
+
+    if(taskit->previousplan == ""){
+
+        planitem = getPlanitem(taskit->currentplan);
+        if(cJSON planitem != NULL){
+            taskit->planitem = planitem;
+            taskit->runtype = "F";
+            runInstructionFromPlan(taskit);
+            fPlanitem = planitem;
+        }
+
+    } else {
+        if(taskit->previousplanrunseq == "A"){
+
+            planitem = getPlanitem(taskit->currentplan);
+            if(cJSON planitem != NULL){
+                taskit->planitem = planitem;
+                taskit->runtype = "F";
+                runInstructionFromPlan(taskit);
+                //runInstructionFromPlan(planitem,"F");
+                fPlanitem = planitem;
+            }
+            
+            planitem = getPlanitem(taskit->previousplan);
+            if(cJSON planitem != NULL){
+                taskit->planitem = planitem;
+                taskit->runtype = "R";
+                runInstructionFromPlan(taskit);
+                //runInstructionFromPlan(planitem,"R");
+            }
+
+        } else if(taskit->previousplanrunseq == "B"){
+
+            planitem = getPlanitem(taskit->previousplan);
+            if(cJSON planitem != NULL){
+                taskit->planitem = planitem;
+                taskit->runtype = "R";
+                runInstructionFromPlan(taskit);
+                //runInstructionFromPlan(planitem,"R");
+            }
+            
+            planitem = getPlanitem(taskit->currentplan);
+            if(cJSON planitem != NULL){
+                taskit->planitem = planitem;
+                taskit->runtype = "F";
+                runInstructionFromPlan(taskit);
+                //runInstructionFromPlan(planitem,"F");
+                fPlanitem = planitem;
+            }        
+        }        
+    }
+
+    //implement milli and check for any force stop
+    unsigned long starttime=millis(); 
+    cJSON* planruntime = cJSON_GetObjectItem(fPlanitem, "runtime");
+
+    for(;(starttime-millis())<planruntime->valueint;){
+        vTaskDelay(10000);
+        if(chkforcestop())            
+            break;        
+    }
+
+    if(chkforcestop()){
+        //forcestart = false;  This is to be done at schedule
+        //for(i = cJSON_GetArraySize(stepsitem); i >=0 ; i--){
+        taskit->planitem = fPlanitem;
+        taskit->runtype = "R";
+        runInstructionFromPlan(taskit);
+        //runInstructionFromPlan(fPlanitem,"R");
+        //}
+    }
+}
+
+void NeerClass::getInstructionFromSchedule(scheduleitem *schitc){
+    cJSON * subitem = NULL;
+    taskitem *taskitcpy;
+    taskitcpy = malloc(sizeof(struct taskitem));
+    cJSON *item = cJSON_GetObjectItem(_scheduleconfig,"items");
+    
+    if(schitc->isplan){
+        taskitcpy->previousplan = "";
+        taskitcpy->currentplan = schitc->name;
+        taskitcpy->previousplanrunseq = "A";   //As of now all are defaulted to after
+        taskitcpy->islastplan = true;
+        executePlan(taskitcpy);
+        return;
+    }  
+    
+    for (i = 0; i < cJSON_GetArraySize(_scheduleconfig) ; i++){     
+        cJSON* subitemtest = cJSON_GetArrayItem(_scheduleconfig, i);  
+        cJSON* name = cJSON_GetObjectItem(subitemtest, "name");
+        if(name-> valuestring == schitc->name ){
+            subitem = subitemtest;
+            break;
+        }
+    }
+
+    if(subitem != NULL){
+        cJSON *plitem = cJSON_GetObjectItem(subitem,"planids");
+
+        int jarsiz = cJSON_GetArraySize(plitem);
+
+        for(i = 0; i < jarsiz ; i++){
+
+            if(chkforcestop()){
+                forcestart = false;
+                break;
+            }
+
+            cJSON * subitempl = cJSON_GetArrayItem(plitem, i);
+            if(i==0){
+                taskitcpy->previousplan = "";
+            } else {
+                taskitcpy->previousplan = taskitcpy->currentplan;
+            }                
+            taskitcpy->currentplan = subitempl->valuestring;
+            taskitcpy->previousplanrunseq = "A";   //As of now all are defaulted to after
+            taskitcpy->islastplan = false;
+            if(i == jarsiz-1) {
+                taskitcpy->islastplan = true;
+            }
+
+            taskitcpy->isfirstplan = false;
+            if(i == 0) {
+                taskitcpy->isfirstplan = true;
+            }
+            executePlan(taskitcpy);
+        }
+    }
+}
+
+void NeerClass::executeTask( void * parameter ){
+    threadit * data = (threadit *) parameter;
+    scheduleitem *schit;
+    if(data->itemtype == "S"){        
+        schit->isplan = false;
+    }else if(data->itemtype == "P"){
+        schit->isplan = true;
+    }
+    schit->name = data->itemname;
+    getInstructionFromSchedule(schit);
+    Serial.println("Ending a task");
+    vTaskDelete( *(xHandle[data->arraylocation]) );
+    xHandle[data->arraylocation] == NULL;
+}
+
+bool NeerClass::beginTask(threadit* parameter){
+    for (i=0;i<ALLOWED_TASKS;i++){
+        if(xHandle[i] == NULL){
+            parameter->arraylocation = i;
+            TaskHandle_t xHandlecpy = NULL;
+            xTaskCreate(
+                executeTask,      /* Task function. */
+                "TaskOne",        /* String with name of task. */
+                1000,            /* Stack size in bytes. */
+                parameter,        /* Parameter passed as input of the task */
+                1,                /* Priority of the task. */
+                &xHandlecpy);     /* Task handle. */
+            xHandle[i]= &xHandlecpy;
+            return true;
+        }
+    }
+    return false;
+    
+}
+
+
+
+void taskOne( void * parameter )
+{
+ 
+    for( int i = 0;i<10;i++ ){
+ 
+        Serial.println("Hello from task 1");
+        delay(1000);
+        Serial.print("FREE MEMORY task1: ");
+        Serial.println(ESP.getFreeHeap());
+    }
+ 
+    Serial.println("Ending task 1");
+    vTaskDelete( NULL );
+ 
+}
+ 
+void taskTwo( void * parameter)
+{
+ 
+    for( int i = 0;i<10;i++ ){
+ 
+        Serial.println("Hello from task 2");
+        delay(1000);
+        Serial.print("FREE MEMORY task2: ");
+        Serial.println(ESP.getFreeHeap());
+    }
+    Serial.println("Ending task 2");
+    vTaskDelete( NULL );
+ 
+}
+
+bool NeerClass::begintask(){
+
+    for (i=0;i<ALLOWED_TASKS;i++){
+        if(xHandle[i]== NULL){
+            TaskHandle_t xHandlecpy = NULL;
+            xTaskCreate(
+                taskOne,          /* Task function. */
+                "TaskOne",        /* String with name of task. */
+                10000,            /* Stack size in bytes. */
+                NULL,             /* Parameter passed as input of the task */
+                1,                /* Priority of the task. */
+                &xHandlecpy);     /* Task handle. */
+            xHandle[i]= &xHandlecpy;
+            return true
+        } else {
+            return false;
+        }
+    }
+    
+    
+
+    xTaskCreate(
+                    taskOne,          /* Task function. */
+                    "TaskOne",        /* String with name of task. */
+                    10000,            /* Stack size in bytes. */
+                    NULL,             /* Parameter passed as input of the task */
+                    1,                /* Priority of the task. */
+                    NULL);            /* Task handle. */
+
+    xTaskCreate(
+                    taskTwo,          /* Task function. */
+                    "TaskTwo",        /* String with name of task. */
+                    10000,            /* Stack size in bytes. */
+                    NULL,             /* Parameter passed as input of the task */
+                    1,                /* Priority of the task. */
+                    NULL);            /* Task handle. */
+
+}
+
+
 
 /* Parse text to JSON, then render back to text, and print! */
+/*
 void NeerClass::doit(char *text){
     char *out = NULL;
     cJSON *json = NULL;
@@ -304,9 +682,11 @@ void NeerClass::doit(char *text){
 		fp.close();
 
 }
+*/
 
 /*https://github.com/kbranigan/cJSON/blob/master/test.c*/
 /* Read a file, parse, render back, etc. */
+/*
 void NeerClass::dofile(char *filename){
     //FILE *f = NULL;
     //uint8_t *ptr = (uint8_t *)&dm1;
@@ -315,7 +695,7 @@ void NeerClass::dofile(char *filename){
     long len = 0;
     char *data = NULL;
     Serial.println(filename);
-    /* open in read binary mode */
+    // open in read binary mode 
     File f = LittleFS.open(filename,"r");
 
     char termseq1[] = "pinvalue";
@@ -343,14 +723,7 @@ void NeerClass::dofile(char *filename){
                 break;
             }
 
-            /*
-            String line = f.readStringUntil('\n');
-            char * writable = new char[line.length() + 1];
-            std::copy(line.begin(), line.end(), writable);
-            writable[line.length()] = '\0'; // don't forget the terminating 0
-            Serial.println(writable);
-            doit(writable);
-            */
+
         }
         Serial.println("after start");
         if(y){
@@ -361,11 +734,7 @@ void NeerClass::dofile(char *filename){
             f.seek(f.position());  
             f.print(stringd);
             //f.write(stringd,sizeof(stringd));
-            /*
-            for (std::string::size_type i = 0; i < stringd.length(); i++) {
-                f.write(stringd[i]);        
-            } 
-            */      
+     
         }
         f.flush();
         f.close();
@@ -382,5 +751,76 @@ void NeerClass::dofile(char *filename){
 }
 
 
+cJSON* NeerClass::getInstructionFromStep(cJSON* stepitem){
+    cJSON *instructionsetone = cJSON_CreateArray();
+    
+    cJSON *stepname =cJSON_GetObjectItem(stepitem, "name");
+    cJSON *stepfield =cJSON_GetObjectItem(stepitem, "field");
+
+    if (stepname->valuestring == "delay"){
+        cJSON *resolution = cJSON_CreateObject();
+        cJSON_AddItemToArray(instructionsetone, resolution);
+        cJSON *delaytime = cJSON_CreateNumber(stepfield->valueint);
+        cJSON *command = cJSON_CreateString("D");
+        cJSON_AddItemToObject(resolution, "command", command);
+        cJSON_AddItemToObject(resolution, "delaytime", delaytime);
+
+    }else {
+        for(i = 0; i < cJSON_GetArraySize(_pinconfig) ; i++){
+            cJSON* subitempinconf = cJSON_GetArrayItem(_pinconfig, i);    
+            cJSON* pinconfname = cJSON_GetObjectItem(subitempinconf, "name");
+
+            if(pinconfname->valuestring == stepname->valuestring){
+                //TODO checks
+                switch(stepfield->valuestring){
+                    case("on"):{
+                        cJSON* onfield = cJSON_GetObjectItem(subitempinconf, "on");
+                        cJSON* pintype = cJSON_GetObjectItem(onfield, "pintype");
+                        cJSON* pinnum = cJSON_GetObjectItem(onfield, "pinnum");
+                        cJSON* pinvalue = cJSON_GetObjectItem(onfield, "pinvalue");
+                        cJSON* signaltype = cJSON_GetObjectItem(onfield, "signaltype");
+                        
+
+                        cJSON *resolution = cJSON_CreateObject();
+                        cJSON_AddItemToArray(instructionsetone, resolution);
+                        cJSON *command = cJSON_CreateString("POS");
+                        cJSON *pinu = cJSON_CreateInteger(pinnum->valueint);
+                        cJSON *pinval = cJSON_CreateInteger(pinvalue->valueint);
+                        cJSON_AddItemToObject(resolution, "command", command);
+                        cJSON_AddItemToObject(resolution, "pinnum", pinu);
+                        cJSON_AddItemToObject(resolution, "pinvalue", pinval);
+
+                        
+                        if(signaltype->valuestring == "trigger"){
+                            cJSON *resolution1 = cJSON_CreateObject();
+                            cJSON_AddItemToArray(instructionsetone, resolution1);
+                            
+                            cJSON *delaytime1 = cJSON_CreateNumber(triggerdelay->valueint);
+                            cJSON *command1 = cJSON_CreateString("D");
+                            cJSON_AddItemToObject(resolution1, "command", command1);
+                            cJSON_AddItemToObject(resolution1, "delaytime", delaytime1);
+
+
+
+                            cJSON *resolution2 = cJSON_CreateObject();
+                            cJSON_AddItemToArray(instructionsetone, resolution2);
+                            cJSON *command2 = cJSON_CreateString("POS");
+                            cJSON *pinu2 = cJSON_CreateInteger(pinnum->valueint);
+                            cJSON *pinval2 = cJSON_CreateInteger(flipPinValue(pinvalue->valueint));
+                            cJSON_AddItemToObject(resolution2, "command", command2);
+                            cJSON_AddItemToObject(resolution2, "pinnum", pinu2);
+                            cJSON_AddItemToObject(resolution2, "pinvalue", pinval2);                       
+                        }
+
+                        break;
+                    }
+                }           
+                break;
+            }
+        }
+    }
+    return instructionset;
+}
+*/
 
 NeerClass Neer;
